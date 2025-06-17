@@ -3,10 +3,11 @@ from rest_framework.views import APIView
 from accounts.serializers import UserRegisterSerializer, UserLoginSerializer
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.response import Response
-from accounts.utils import generate_otp, send_otp, is_verified, varify_otp, validate_new_passsword
+from accounts.utils import generate_otp, is_verified, varify_otp, validate_new_passsword
 from django.core.cache import cache
 from accounts.models import VerifiedEmail
 from rest_framework_simplejwt.tokens import RefreshToken
+from accounts.tasks import send_otp
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
@@ -158,7 +159,6 @@ class LoginApiView(APIView):
     def post(self, request):
         try:
             data = request.data
-
             serializer = UserLoginSerializer(data=data)
             if serializer.is_valid():
                 email = serializer.validated_data.get("email")
