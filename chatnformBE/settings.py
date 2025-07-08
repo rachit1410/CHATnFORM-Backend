@@ -28,12 +28,13 @@ SECRET_KEY = 'django-insecure-u6x80yv8d3d(#8vh8(b%4xlwlt7zf2m(79y2j=(ai!@ydu7i7m
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -78,7 +79,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'chatnformBE.wsgi.application'
+# WSGI_APPLICATION = 'chatnformBE.wsgi.application'
+ASGI_APPLICATION = 'chatnformBE.asgi.application'
 
 
 # Database
@@ -129,6 +131,19 @@ USE_I18N = True
 
 USE_TZ = True
 
+# settings for chanals and kafka
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("localhost", 6379)],
+        },
+    },
+}
+KAFKA_BROKER_URL = 'localhost:9092'
+KAFKA_TOPIC = 'chat_messages'
+
 
 # SMTP configration
 
@@ -146,8 +161,10 @@ EMAIL_USE_SSL = False
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
+
 STATIC_URL = '/static/'
-STATICFILE_DIRS = [os.path.join(BASE_DIR, "public/static")]
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "public/static")]
+STATIC_ROOT = os.path.join(BASE_DIR, "public/staticfiles")
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "public/media")
