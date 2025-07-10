@@ -1,21 +1,26 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import generics
-# from chat.kafka_utils import send_realtime_event
-# from django.utils import timezone
-# from django.conf import settings
-from chat.serializers import GroupSerialiazer
-from chat.models import ChatGroup
+from chat.serializers import GroupSerialiazer, ChatSerializer
+from chat.models import ChatGroup, Member, GroupChat
 import logging
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.permissions import IsAuthenticated
+from chat.permissions import IsMember
 from uuid import UUID
+from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.authentication import JWTAuthentication
 logger = logging.getLogger(__name__)
 
 
 class CreateGroupAPI(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         try:
             data = request.data
+            data["group_owner"] = request.user.pk
             serializer = GroupSerialiazer(data=data)
 
             if serializer.is_valid():
@@ -50,7 +55,11 @@ class CreateGroupAPI(APIView):
         group_id = UUID(request.data.get('group_id'))
 
         try:
-            group = ChatGroup.objects.get(uid=group_id, group_owner=user)
+            group = ChatGroup.objects.get(
+                uid=group_id,
+                member__member=user,
+                member__role="admin"
+            )
             serializer = GroupSerialiazer(group, data=request.data, partial=True)
 
             if serializer.is_valid():
@@ -82,7 +91,7 @@ class CreateGroupAPI(APIView):
         user = request.user
         group_id = UUID(request.data.get('group_id'))
         try:
-            group = ChatGroup.objects.get(uid=group_id, created_by=user)
+            group = ChatGroup.objects.get(uid=group_id, group_owner=user)
             group.delete()
             return Response(
                 {
@@ -102,6 +111,8 @@ class CreateGroupAPI(APIView):
 
 
 class ListGroupsAPI(generics.ListAPIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
     serializer_class = GroupSerialiazer
 
     def get_queryset(self):
@@ -122,7 +133,59 @@ class ListGroupsAPI(generics.ListAPIView):
             )
 
 
-# def post(self, request):
-#     data = {'event_type': 'user_action', 'user_id': request.user.id, 'timestamp': str(timezone.now())}
-#     send_realtime_event(settings.KAFKA_TOPIC, data)
-#     return Response({'status': 'event sent'})
+class AddMemberAPI(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        User = get_user_model()
+        try:
+            data = request.data
+            group = ChatGroup.objects.filter(
+                uid=UUID(data.get("group_id")),
+                member__member=request.user,
+                member__role='admin'
+            )
+
+            user_ids_list = data.get("members")
+
+            for user_id in user_ids_list:
+                user = User.objects.get(id=user_id)
+                Member.objects.create(member=user, group=group)
+                logger.info(f"Added member {user.email} in group.")
+            logger.info("Successfully added members in group.")
+            return Response(
+                {
+                    "status": True,
+                    "message": "members added to group.",
+                    "data": {}
+                }
+            )
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "status": False,
+                    "message": "User does not exists.",
+                    "data": {}
+                }
+            )
+        except Exception as e:
+            logger.error(f"An unexpected error occured: {e}")
+            return Response(
+                {
+                    "status": False,
+                    "message": "something went wrong.",
+                    "data": {}
+                }
+            )
+
+
+class MessageAPI(generics.ListAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, IsMember]
+    queryset = GroupChat.objects.all()
+    serializer_class = ChatSerializer
+
+    def get_queryset(self):
+        group_id = UUID(self.request.GET.get("group"))
+        return self.queryset.filter(group__uid=group_id)

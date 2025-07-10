@@ -10,7 +10,7 @@ class ImageSerializer(serializers.ModelSerializer):
 
 
 class GroupSerialiazer(serializers.ModelSerializer):
-    group_profile = ImageSerializer()
+    # group_profile = ImageSerializer()
 
     def create(self, validated_data):
         user = validated_data.get("group_owner")
@@ -28,7 +28,7 @@ class GroupSerialiazer(serializers.ModelSerializer):
 
 
 class MemberSerializer(serializers.ModelSerializer):
-    group = GroupSerialiazer()
+    group = GroupSerialiazer(many=True)
 
     class Meta:
         model = Member
@@ -45,7 +45,6 @@ class RequestSerializer(serializers.ModelSerializer):
 
 
 class ChatSerializer(serializers.ModelSerializer):
-    image_message = ImageSerializer()
     group = ChatGroup()
 
     class Meta:

@@ -142,7 +142,7 @@ CHANNEL_LAYERS = {
     },
 }
 KAFKA_BROKER_URL = 'localhost:9092'
-KAFKA_TOPIC = 'chat_messages'
+KAFKA_TOPIC = 'messages'
 
 
 # SMTP configration

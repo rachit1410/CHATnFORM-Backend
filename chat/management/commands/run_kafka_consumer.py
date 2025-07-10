@@ -37,7 +37,7 @@ class Command(BaseCommand):
                 data = json.loads(message_value)
 
                 async_to_sync(channel_layer.group_send)(
-                    data["group"],
+                    data["group_id"],
                     {
                         "type": "send_realtime_data",
                         "data": data

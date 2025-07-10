@@ -4,11 +4,10 @@ from chat.kafka_utils import send_realtime_event
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from channels.exceptions import StopConsumer
-# from chat.models import GroupChat, ChatGroup
-# from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model
 from django.utils import timezone
-# from uuid import UUID
 import logging
+from uuid import UUID
 logger = logging.getLogger(__name__)
 
 
@@ -33,29 +32,42 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close(code=1011)
 
     async def receive(self, text_data=None):
-        # User = get_user_model()
+        from chat.models import ChatGroup, GroupChat
+        User = get_user_model()
         try:
             data = json.loads(text_data)
+            sender_id = data["sender"]
+            group_id = self.group_name
+
+            group = await sync_to_async(ChatGroup.objects.get)(uid=UUID(group_id), group_members__member__id=sender_id)
+
+            sent_by = await sync_to_async(User.objects.get)(id=sender_id)
             message_data = {
-                "sender_id": data["sender"],
-                "group_id": data["group"],
-                "message": data["message"].encode("utf-8"),
+                "sender_id": sender_id,
+                "group_id": group_id,
+                "message": data["message"],
                 "message_type": data["message_type"],
                 "timestamp": timezone.now().isoformat()
             }
+            # uploading messages to database
+            await sync_to_async(GroupChat.objects.create)(
+                group=group,
+                sent_by=sent_by,
+                message_type=data["message_type"],
+                text_message=data["message"]
+            )
 
-            # await sync_to_async(GroupChat.objects.create)(
-            #     group=ChatGroup.objects.get(uuid=UUID(data["group"])),
-            #     sent_by=User.objects.get(uuid=UUID(data["sender"])),
-            #     message_type=data["message_type"],
-            #     text_message=data["message"]
-            # )
-
+            # publishing messages to kafka
             await sync_to_async(send_realtime_event)(
                 settings.KAFKA_TOPIC,
                 message_data
             )
 
+        except ChatGroup.DoesNotExist:
+            logger.error(f"User {sender_id} sent message in unsubscribed group.")
+            await self.send(text_data=json.dumps({
+                "error": "You are not authorised to message in this group."
+            }))
         except StopConsumer:
             logger.info("StopConsumer exception raised, closing WebSocket.")
             await self.close()

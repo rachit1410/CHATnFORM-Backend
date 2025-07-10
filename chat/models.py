@@ -5,7 +5,7 @@ import uuid
 
 
 class Base(models.Model):
-    uid = models.UUIDField(default=uuid.uuid4, primary_key=True, unique=True)
+    uid = models.UUIDField(default=uuid.uuid4, primary_key=True, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -20,7 +20,7 @@ class Image(Base):
 class ChatGroup(Base):
     User = get_user_model()
     group_owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="my_groups")
-    group_name = models.CharField(max_length=255)
+    group_name = models.CharField(max_length=255, unique=True)
     group_description = models.TextField(null=True, blank=True)
     group_profile = models.ForeignKey(Image, related_name="group_image", on_delete=models.SET_NULL, null=True, blank=True)
     group_type = models.CharField(max_length=100, choices=GROUP_TYPES)
@@ -35,7 +35,7 @@ class JoinRequest(Base):
 class Member(Base):
     User = get_user_model()
     group = models.ForeignKey(ChatGroup, on_delete=models.CASCADE, related_name="group_members")
-    member = models.ManyToManyField(User, related_name="joined_groups")
+    member = models.ForeignKey(User, related_name="joined_groups", on_delete=models.CASCADE)
     role = models.CharField(max_length=100, default="regular", choices=ROLE_CHOICES)
 
 
