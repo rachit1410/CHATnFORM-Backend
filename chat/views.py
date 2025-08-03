@@ -1,30 +1,32 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import generics
-from chat.serializers import GroupSerialiazer, ChatSerializer
+from chat.serializers import GroupSerialiazer, ChatSerializer, MemberSerializer
 from chat.models import ChatGroup, Member, GroupChat
 import logging
-from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
 from chat.permissions import IsMember
 from uuid import UUID
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.authentication import JWTAuthentication
-logger = logging.getLogger(__name__)
+from rest_framework import status
+from chat.tasks import finalize_group_creation
+logger = logging.getLogger()
 
 
 class CreateGroupAPI(APIView):
-    authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         try:
-            data = request.data
+            logger.info("post method called in CreateGroupAPI")
+            data = request.data.copy()
             data["group_owner"] = request.user.pk
             serializer = GroupSerialiazer(data=data)
-
             if serializer.is_valid():
+                logger.info("serializer is valid")
                 serializer.save()
+                finalize_group_creation(data, serializer)
                 return Response(
                     {
                         "status": True,
@@ -32,6 +34,8 @@ class CreateGroupAPI(APIView):
                         "data": {}
                     }
                 )
+            print("serializer is not valid")
+            logger.error(f"serializer errors: {serializer.errors}")
             return Response(
                 {
                     "status": False,
@@ -42,12 +46,13 @@ class CreateGroupAPI(APIView):
 
         except Exception as e:
             logger.error(f"an unaxpected error occurred while creating group: {e}")
+            print(f"an unexpected error occurred while creating group: {e}")
             return Response(
                 {
                     "status": False,
                     "message": "something went wrong.",
                     "data": {}
-                }
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
     def patch(self, request, *args, **kwargs):
@@ -111,17 +116,26 @@ class CreateGroupAPI(APIView):
 
 
 class ListGroupsAPI(generics.ListAPIView):
-    authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
     serializer_class = GroupSerialiazer
+    queryset = ChatGroup.objects.all()
 
     def get_queryset(self):
         user = self.request.user
-        return ChatGroup.objects.filter(member__member=user)
+        return self.queryset.filter(group_members__member=user)
 
     def get(self, request, *args, **kwargs):
         try:
-            return super().get(request, *args, **kwargs)
+            queryset = self.get_queryset()
+            serializer = self.serializer_class(queryset, many=True)
+            data = serializer.data
+            return Response(
+                {
+                    "status": True,
+                    "message": "Info : groups fetched.",
+                    "data": data
+                }
+            )
         except Exception as e:
             logger.error(f"an unexpected error occurred while listing joined groups: {e}")
             return Response(
@@ -129,30 +143,83 @@ class ListGroupsAPI(generics.ListAPIView):
                     "status": False,
                     "message": "something went wrong.",
                     "data": {}
-                }
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
-class AddMemberAPI(APIView):
-    authentication_classes = [TokenAuthentication]
+class MemberAPI(APIView):
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        group_id = request.GET.get("group")
+        if not group_id:
+            logger.error("error: group_id not provided")
+            return Response(
+                {
+                    "status": False,
+                    "message": "error: group_id not provided.",
+                    "data": {}
+                }
+            )
+        try:
+            group = ChatGroup.objects.get(uid=UUID(group_id), group_members__member=request.user)
+            members = Member.objects.filter(group=group)
+
+            serializer = MemberSerializer(members, many=True)
+            return Response(
+                {
+                    "status": True,
+                    "message": "Members fetched.",
+                    "data": {
+                        "members": serializer.data
+                    }
+                }
+            )
+        except ChatGroup.DoesNotExist:
+            logger.error("error: invalid group id provided.")
+            return Response(
+                {
+                    "status": False,
+                    "message": "Group does not exists.",
+                    "data": {}
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"an unexpected error occurred while getting members: {e}")
+            return Response(
+                {
+                    "status": False,
+                    "message": "something went wrong.",
+                    "data": {}
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     def post(self, request):
         User = get_user_model()
         try:
             data = request.data
-            group = ChatGroup.objects.filter(
-                uid=UUID(data.get("group_id")),
-                member__member=request.user,
-                member__role='admin'
-            )
+            try:
+                group = ChatGroup.objects.get(
+                    uid=UUID(data.get("group_id")),
+                    member__member=request.user,
+                    member__role='admin'
+                )
+            except ChatGroup.DoesNotExist:
+                return Response(
+                    {
+                        "status": False,
+                        "message": "Group does not exist or you don't have admin rights.",
+                        "data": {}
+                    }
+                )
 
             user_ids_list = data.get("members")
 
             for user_id in user_ids_list:
                 user = User.objects.get(id=user_id)
                 Member.objects.create(member=user, group=group)
-                logger.info(f"Added member {user.email} in group.")
+                logger.info(f"Added member {user.pk} in group.")
             logger.info("Successfully added members in group.")
             return Response(
                 {
@@ -176,7 +243,7 @@ class AddMemberAPI(APIView):
                     "status": False,
                     "message": "something went wrong.",
                     "data": {}
-                }
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 

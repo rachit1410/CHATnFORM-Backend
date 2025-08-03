@@ -1,6 +1,7 @@
 import logging
 from rest_framework.views import APIView
-from accounts.serializers import UserRegisterSerializer, UserLoginSerializer
+from accounts.serializers import UserRegisterSerializer, UserLoginSerializer, CNFUserSerializer
+from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.response import Response
 from accounts.utils import generate_otp, is_verified, varify_otp, validate_new_passsword
@@ -56,11 +57,11 @@ class RegisterApiView(APIView):
             )
 
 
-class VerifyEmail(APIView):
+class SendOTP(APIView):
 
-    def get(self, request):
+    def post(self, request):
         try:
-            email = request.GET.get("email")
+            email = request.data.get('email')
             logger.info(f"Received email verification request for: {email}")
 
             if is_verified(email):
@@ -111,8 +112,11 @@ class VerifyEmail(APIView):
                     "status": False,
                     "message": "something went wrong",
                     "data": {}
-                }
+                },
             )
+
+
+class VerifyEmail(APIView):
 
     def post(self, request):
         try:
@@ -156,6 +160,36 @@ class VerifyEmail(APIView):
 
 class LoginApiView(APIView):
 
+    def get(self, request):
+        refresh_token = request.COOKIES.get('refresh_token')
+        if not refresh_token:
+            return Response(
+                {
+                    'status': False,
+                    'message': 'No refresh token',
+                    'data': {}
+                })
+
+        try:
+            refresh = RefreshToken(refresh_token)
+            access = str(refresh.access_token)
+            return Response(
+                {
+                    'status': True,
+                    'message': 'Token refreshed.',
+                    'data': {
+                        'access': access
+                    }
+                }
+            )
+        except Exception:
+            return Response(
+                {
+                    'status': False,
+                    'message': 'Invalid refresh token',
+                    'data': {}
+                },)
+
     def post(self, request):
         try:
             data = request.data
@@ -170,7 +204,7 @@ class LoginApiView(APIView):
                             "status": False,
                             "message": "Your email is not verified. Please verify your email.",
                             "data": {}
-                        }
+                        }, status=400
                     )
 
                 authenticated_user = authenticate(request=request, email=email, password=password)
@@ -182,28 +216,36 @@ class LoginApiView(APIView):
                             "status": False,
                             "message": "incorrect password",
                             "data": {}
-                        }
+                        }, status=400
                     )
 
-                refresh = RefreshToken.for_user(authenticated_user)
-                return Response(
+                token = RefreshToken.for_user(authenticated_user)
+                res = Response(
                     {
                         "status": True,
                         "message": "Logged in successfully",
                         "data": {
-                            "refresh_token": str(refresh),
-                            "access_token": str(refresh.access_token)
+                            "access": str(token.access_token)
                         }
                     }
                 )
 
+                res.set_cookie(
+                    key='refresh_token',
+                    value=str(token),
+                    httponly=True,
+                    secure=True,
+                    samesite='Lax',
+                    max_age=7 * 24 * 3600,
+                )
+                return res
             logger.warning(f"Registration failed: {serializer.errors}")
             return Response(
                 {
                     "status": False,
                     "message": serializer.errors,
                     "data": {}
-                }
+                }, status=400
             )
 
         except Exception as e:
@@ -213,12 +255,12 @@ class LoginApiView(APIView):
                     "status": False,
                     "message": "something went wrong",
                     "data": {}
-                }
+                }, status=400
             )
 
     def delete(self, request):
         try:
-            refresh_token = request.data.get("refresh_token")
+            refresh_token = request.COOKIES.get('refresh_token')
             if refresh_token:
                 try:
                     token = RefreshToken(refresh_token)
@@ -260,44 +302,6 @@ class LoginApiView(APIView):
 
 
 class VarifyToCP(APIView):
-    def get(self, request):
-        try:
-            email = request.data.get("email")
-
-            if not User.objects.filter(email=email).exists():
-                return Response(
-                    {
-                        "status": False,
-                        "message": "Account does not exists.",
-                        "data": {}
-                    }
-                )
-
-            generate_otp(email)
-            otp = cache.get(f"otp:{email}")
-            send_otp(
-                subject="OTP for email verification.",
-                message=f'''Your otp for email vaification is {otp}. Enter this otp in otp verification section and hit varify to move forward.''',
-                email=email
-            )
-            logger.info(f"OTP sent to email: {email}")
-            return Response(
-                    {
-                        "status": True,
-                        "message": "OTP sent.",
-                        "data": {}
-                    }
-                )
-        except Exception as e:
-            logger.error(f"Exception in verifyEmail GET: {e}", exc_info=True)
-            return Response(
-                {
-                    "status": False,
-                    "message": "something went wrong.",
-                    "data": {}
-                }
-            )
-
     def post(self, request):
         try:
             email = request.data.get("email")
@@ -380,4 +384,33 @@ class ChangePassword(APIView):
                     "message": "something went wrong.",
                     "data": {}
                 }
+            )
+
+
+class GetUserAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            queryset = User.objects.get(pk=request.user.pk)
+            serializer = CNFUserSerializer(queryset)
+            print(serializer.data)
+
+            return Response(
+                {
+                    'status': True,
+                    'message': 'User returned.',
+                    'data': {
+                        "user": serializer.data
+                    }
+                }
+            )
+
+        except User.DoesNotExist:
+            return Response(
+                {
+                    'status': False,
+                    'message': 'user not authenticated.',
+                    'data': {}
+                }, status=401
             )

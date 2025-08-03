@@ -23,7 +23,10 @@ class ChatGroup(Base):
     group_name = models.CharField(max_length=255, unique=True)
     group_description = models.TextField(null=True, blank=True)
     group_profile = models.ForeignKey(Image, related_name="group_image", on_delete=models.SET_NULL, null=True, blank=True)
-    group_type = models.CharField(max_length=100, choices=GROUP_TYPES)
+    group_type = models.CharField(max_length=100, choices=GROUP_TYPES, default='private')
+
+    def __str__(self):
+        return self.group_name
 
 
 class JoinRequest(Base):

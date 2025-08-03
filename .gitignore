@@ -4,3 +4,4 @@ start-server.bat
 celery-start.bat
 kafka-consumer-start.bat
 git-upload.bat
+search_index.bat

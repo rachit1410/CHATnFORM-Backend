@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
+    'django_elasticsearch_dsl',
     'accounts',
     'chat',
     'forms',
@@ -142,6 +143,15 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
+# elasticsearch config
+
+ELASTICSEARCH_DSL = {
+    'default': {
+        'hosts': 'http://127.0.0.1:9200',
+        'verify_certs': False,
+    }
+}
+
 
 # settings for chanals and kafka
 
@@ -155,7 +165,6 @@ CHANNEL_LAYERS = {
 }
 KAFKA_BROKER_URL = 'localhost:9092'
 KAFKA_TOPIC = 'messages'
-
 
 # SMTP configration
 
@@ -195,7 +204,7 @@ REST_FRAMEWORK = {
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 
 CACHES = {

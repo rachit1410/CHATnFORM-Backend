@@ -5,30 +5,30 @@ from accounts.serializers import CNFUserSerializer
 
 class ImageSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Image()
+        model = Image
         fields = ['image']
 
 
 class GroupSerialiazer(serializers.ModelSerializer):
-    # group_profile = ImageSerializer()
-
-    def create(self, validated_data):
-        user = validated_data.get("group_owner")
-        group = ChatGroup.objects.create(**validated_data)
-        Member.objects.create(
-            member=user,
-            group=group,
-            role="admin"
-        )
-        return group
+    group_profile = ImageSerializer(required=False)
 
     class Meta:
         model = ChatGroup
         exclude = ['updated_at']
 
+    def validate(self, data):
+        if data.get('group_name') and not isinstance(data.get('group_name'), str):
+            raise serializers.ValidationError("group_name must be a string.")
+        if data.get('group_name') and ChatGroup.objects.filter(group_name=data.get('group_name')):
+            raise serializers.ValidationError("group name already exists.")
+        if not data.get('group_type') or data.get('group_type') not in ['private', 'public']:
+            data['group_type'] = 'private'
+        return data
+
 
 class MemberSerializer(serializers.ModelSerializer):
-    group = GroupSerialiazer(many=True)
+    member = CNFUserSerializer()
+    group = GroupSerialiazer()
 
     class Meta:
         model = Member
@@ -37,7 +37,7 @@ class MemberSerializer(serializers.ModelSerializer):
 
 class RequestSerializer(serializers.ModelSerializer):
     group = GroupSerialiazer()
-    cnf_user = CNFUserSerializer()
+    sender = CNFUserSerializer()
 
     class Meta:
         model = JoinRequest

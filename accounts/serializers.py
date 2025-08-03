@@ -7,7 +7,7 @@ User = get_user_model()
 class CNFUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'name', 'profile_image']
+        fields = ['id', 'email', 'name', 'profile_image']
 
 
 class UserRegisterSerializer(serializers.Serializer):

@@ -4,17 +4,17 @@ from accounts.views import (
     VerifyEmail,
     LoginApiView,
     VarifyToCP,
-    ChangePassword
-)
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
+    ChangePassword,
+    SendOTP,
+    GetUserAPI
 )
 
 urlpatterns = [
     path("register/", RegisterApiView.as_view()),
-    path("varify-email/", VerifyEmail.as_view()),
-    path("login-n-logout/", LoginApiView.as_view()),
-    path('token/refresh/', TokenRefreshView.as_view()),
+    path("send-otp/", SendOTP.as_view()),
+    path("verify-email/", VerifyEmail.as_view()),
+    path("jwt/", LoginApiView.as_view()),
+    path("me/", GetUserAPI.as_view()),
     path('forgot-password/', VarifyToCP.as_view()),
     path('change-password/', ChangePassword.as_view()),
 ]
