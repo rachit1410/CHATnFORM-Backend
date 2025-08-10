@@ -256,3 +256,4 @@ class MessageAPI(generics.ListAPIView):
     def get_queryset(self):
         group_id = UUID(self.request.GET.get("group"))
         return self.queryset.filter(group__uid=group_id)
+

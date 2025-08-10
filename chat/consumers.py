@@ -44,6 +44,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             sent_by = await sync_to_async(User.objects.get)(id=sender_id)
             message_data = {
                 "sender_id": sender_id,
+                "sender_name": sent_by.name,
                 "group_id": group_id,
                 "message": data["message"],
                 "message_type": data["message_type"],
@@ -85,11 +86,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     async def send_realtime_data(self, event):
-        logger.info("Sending realtime data in the group.")
+        logger.info(f"send_realtime_data handler triggered. Event: {event}")
+        print(f"send_realtime_data handler triggered. Event: {event}") # Keep your print for now
         data = event["data"]
-        await self.send(json.dumps(
+        message_to_send = json.dumps(
             {
                 "type": "text",
                 "message": data
             }
-        ))
+        )
+
+        try:
+            logger.info(f"Attempting to send message to client. Channel: {self.channel_name}")
+            await self.send(text_data=message_to_send)
+            logger.info(f"Message successfully sent to client: {self.channel_name}")
+        except Exception as e:
+            logger.error(f"Failed to send message to client {self.channel_name}: {e}")
+            # The connection may be closed, and we'll handle that here.
+            await self.close(code=1011) # Or some other appropriate close cod

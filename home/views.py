@@ -12,4 +12,4 @@ class GetCSRFToken(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, format=None):
-        return Response({'csrftoken': get_token(request)})
+        return Response({'csrfToken': get_token(request)})

@@ -45,8 +45,9 @@ class RequestSerializer(serializers.ModelSerializer):
 
 
 class ChatSerializer(serializers.ModelSerializer):
+    sent_by = CNFUserSerializer()
     group = ChatGroup()
 
     class Meta:
         model = GroupChat
-        exclude = ['updated_at']
+        fields = ['sent_by', 'group', 'message_type', 'text_message', 'image_message', 'created_at', 'uid']
