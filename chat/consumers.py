@@ -6,6 +6,7 @@ from django.conf import settings
 from channels.exceptions import StopConsumer
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from chat.utils import is_member
 import logging
 from uuid import UUID
 logger = logging.getLogger(__name__)
@@ -16,16 +17,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         try:
             self.group_name = self.scope["url_route"]["kwargs"]["group_id"]
-
+            user = self.scope['user']
             await self.channel_layer.group_add(
                 self.group_name,
                 self.channel_name
             )
-            await self.accept()
-            logger.info("WebSocket connection accepted.")
-            await self.send(text_data=json.dumps({
-                    "message": "connection made."
-                }))
+            if user and await is_member(self.group_name, user):
+                await self.accept()
+                logger.info("WebSocket connection accepted.")
+                await self.send(text_data=json.dumps({
+                        "message": "connection made."
+                    }))
+            else:
+                logger.info("Not authorized.")
+                await self.close()
+                
 
         except Exception as e:
             logger.exception(f"Error during WebSocket connect:{e}")
@@ -86,8 +92,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     async def send_realtime_data(self, event):
-        logger.info(f"send_realtime_data handler triggered. Event: {event}")
-        print(f"send_realtime_data handler triggered. Event: {event}") # Keep your print for now
         data = event["data"]
         message_to_send = json.dumps(
             {

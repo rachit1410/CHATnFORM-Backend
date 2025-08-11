@@ -3,7 +3,8 @@ from chat.views import (
     CreateGroupAPI,
     ListGroupsAPI,
     MemberAPI,
-    MessageAPI
+    MessageAPI,
+    RefreshApi
 )
 
 urlpatterns = [
@@ -11,4 +12,5 @@ urlpatterns = [
     path("list-groups/", ListGroupsAPI.as_view()),
     path("members/", MemberAPI.as_view()),
     path("messages/", MessageAPI.as_view()),
+    path("custom-refresh/", RefreshApi.as_view())
 ]

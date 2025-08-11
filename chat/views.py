@@ -257,3 +257,17 @@ class MessageAPI(generics.ListAPIView):
         group_id = UUID(self.request.GET.get("group"))
         return self.queryset.filter(group__uid=group_id)
 
+
+class RefreshApi(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(
+            {
+            "status": True,
+            "message": "token refreshed",
+            "data": {}
+        }
+        )
+
