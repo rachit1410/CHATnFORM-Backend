@@ -6,3 +6,4 @@ kafka-consumer-start.bat
 git-upload.bat
 search_index.bat
 django_debug.log
+cmd-env.bat

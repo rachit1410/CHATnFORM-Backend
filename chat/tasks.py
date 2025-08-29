@@ -50,3 +50,19 @@ def finalize_group_creation(data, serializer):
     else:
         logger.info("No member IDs provided, skipping member creation.")
         print("No member IDs provided, skipping member creation.")
+
+
+@shared_task
+def update_image(profile, group):
+    if group.group_profile is not None:
+        if Image.objects.filter(image=group.group_profile.image).exists():
+            group_profile = Image.objects.get(image=group.group_profile.image)
+            group_profile.image = profile
+            group_profile.save()
+            logger.info("image updated.")
+    else:
+        group_profile = Image.objects.create(image=profile)
+        group.group_profile = group_profile
+        group.save()
+        logger.info("image created.")
+

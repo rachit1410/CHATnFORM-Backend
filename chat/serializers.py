@@ -1,7 +1,10 @@
 from rest_framework import serializers
 from chat.models import ChatGroup, Member, JoinRequest, GroupChat, Image
 from accounts.serializers import CNFUserSerializer
+from cryptography.fernet import Fernet
+from django.conf import settings
 
+fernet = Fernet(settings.FERNET_KEY)
 
 class ImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -47,7 +50,26 @@ class RequestSerializer(serializers.ModelSerializer):
 class ChatSerializer(serializers.ModelSerializer):
     sent_by = CNFUserSerializer()
     group = ChatGroup()
+    text_message = serializers.SerializerMethodField()
 
     class Meta:
         model = GroupChat
-        fields = ['sent_by', 'group', 'message_type', 'text_message', 'image_message', 'created_at', 'uid']
+        fields = ['sent_by', 'group', 'message_type', 'text_message', 'file_message', 'created_at', 'uid']
+
+    def get_text_message(self, obj):
+        """Decrypt text_message before sending to frontend."""
+        if obj.text_message:
+            try:
+                return fernet.decrypt(obj.text_message.encode()).decode()
+            except Exception:
+                # In case message is corrupted or was saved without encryption
+                return obj.text_message
+        return None
+
+    def delete(self, request):
+        message = self.queryset
+
+        if message.sent_by.id == request.user.id:
+            message.delete()
+        else:
+            message.deleted_for.add(request.user.id)

@@ -3,6 +3,8 @@ from django.contrib.auth import get_user_model
 from chat.choices import GROUP_TYPES, MESSAGE_TYPE, ROLE_CHOICES
 import uuid
 
+from chatnformBE.middleware.ws_middleware import User
+
 
 class Base(models.Model):
     uid = models.UUIDField(default=uuid.uuid4, primary_key=True, unique=True, editable=False)
@@ -33,6 +35,9 @@ class JoinRequest(Base):
     User = get_user_model()
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_requests")
     group = models.ForeignKey(ChatGroup, on_delete=models.CASCADE, related_name="join_requests")
+    
+    class Meta:
+        unique_together = ('sender', 'group')
 
 
 class Member(Base):
@@ -41,6 +46,18 @@ class Member(Base):
     member = models.ForeignKey(User, related_name="joined_groups", on_delete=models.CASCADE)
     role = models.CharField(max_length=100, default="regular", choices=ROLE_CHOICES)
 
+    def __str__(self):
+        return f"{self.member.name} - {self.group.group_name} ({self.role})"
+
+
+
+class File(Base):
+    file = models.FileField(upload_to="files/")
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="uploaded_files")
+
+    def __str__(self):
+        return self.file.name
+
 
 class GroupChat(Base):
     User = get_user_model()
@@ -48,4 +65,17 @@ class GroupChat(Base):
     sent_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="messages", null=True, blank=True)
     message_type = models.CharField(max_length=100, choices=MESSAGE_TYPE)
     text_message = models.TextField(null=True, blank=True)
-    image_message = models.ForeignKey(Image, related_name="in_chats", on_delete=models.CASCADE, null=True, blank=True)
+    file_message = models.URLField(max_length=200, null=True, blank=True)
+    deleted_for = models.ManyToManyField(User, related_name="deleted_messages")
+
+    @property
+    def filename(self):
+        if self.message_type == 'file' and self.file_message:
+            return f"download/{self.file_message.split('/')[-1]}"
+        return None
+
+    def __str__(self):
+        if self.message_type == 'text':
+            return f"Message by {self.sent_by.name} in {self.group.group_name}: {self.uid}"
+        elif self.message_type == 'file':
+            return f"File message by {self.sent_by.name} in {self.group.group_name}: {self.filename}"

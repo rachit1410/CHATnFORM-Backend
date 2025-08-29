@@ -9,10 +9,12 @@ from django.core.cache import cache
 from accounts.models import VerifiedEmail
 from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.tasks import send_otp
+from rest_framework.parsers import MultiPartParser, FormParser
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
+# new registeration
 class RegisterApiView(APIView):
 
     def post(self, request):
@@ -82,16 +84,16 @@ class SendOTP(APIView):
                     return Response(
                         {
                             "status": False,
-                            "message": "You hav used all your retries, Please come back after a day.",
+                            "message": "You have used all your retries, Please come back after a day.",
                             "data": {}
                         }
                     )
 
             generate_otp(email)
             otp = cache.get(f"otp:{email}")
-            send_otp(
+            send_otp.delay(
                     subject="OTP for email verification.",
-                    message=f'''Your otp for email vaification is {otp}. Enter this otp in otp verification section and hit verify to complete your registration''',
+                    message=f'''Your otp for email verification is {otp}. Enter this otp in otp verification section and hit verify to complete your registration''',
                     email=email
                 )
             logger.info(f"Sent OTP email to: {email}")
@@ -158,6 +160,7 @@ class VerifyEmail(APIView):
             )
 
 
+# login
 class LoginApiView(APIView):
 
     def get(self, request):
@@ -299,6 +302,66 @@ class LoginApiView(APIView):
                     "data": {}
                 }
             )
+  
+        
+# change password >    
+class SendOTPCP(APIView):
+    # sends otp for changing password
+    # different from SendOtp as it verifies the user's email before sending the OTP
+
+    def post(self, request):
+        try:
+            email = request.data.get('email')
+            logger.info(f"Received email verification request for: {email}")
+
+            if not User.objects.filter(email=email).exists():
+                logger.warning(f"Email not found: {email}")
+                return Response(
+                    {
+                        "status": False,
+                        "message": "Email not found. check the email or register now.",
+                        "data": {}
+                    }
+                )
+
+            if tries := cache.get(f"blocked:{email}"):
+                if tries > 5:
+                    logger.warning(f"OTP request throttled for: {email}")
+                    return Response(
+                        {
+                            "status": False,
+                            "message": "You have used all your retries, Please come back after a day.",
+                            "data": {}
+                        }
+                    )
+
+            generate_otp(email)
+            otp = cache.get(f"otp:{email}")
+            send_otp.delay(
+                    subject="OTP for email verification.",
+                    message=f'''Your otp for email verification is {otp}. Enter this otp in otp verification section and hit verify to change password''',
+                    email=email
+                )
+            logger.info(f"Sent OTP email to: {email}")
+
+            return Response(
+                {
+                    "status": True,
+                    "message": "otp sent.",
+                    "data": {
+                        "verified": False
+                    }
+                }
+            )
+        except Exception as e:
+            logger.error(f"Exception in VerifyEmail GET: {e}", exc_info=True)
+            return Response(
+                {
+                    "status": False,
+                    "message": "something went wrong",
+                    "data": {}
+                },
+            )
 
 
 class VarifyToCP(APIView):
@@ -307,7 +370,7 @@ class VarifyToCP(APIView):
             email = request.data.get("email")
             otp = request.data.get("otp")
             if varify_otp(email=email, otp=otp):
-                cache.set(f"varified:{email}", True, 60*12)
+                cache.set(f"varified:{email}", True, 60*30)
                 return Response(
                     {
                         "status": True,
@@ -371,7 +434,7 @@ class ChangePassword(APIView):
             return Response(
                 {
                     "status": False,
-                    "message": "You are not authorized to perform this action.",
+                    "message": "change password session expired. try again.",
                     "data": {}
                 }
             )
@@ -387,15 +450,15 @@ class ChangePassword(APIView):
             )
 
 
-class GetUserAPI(APIView):
+# My Account
+class MyAccount(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
         try:
             queryset = User.objects.get(pk=request.user.pk)
             serializer = CNFUserSerializer(queryset)
-            print(serializer.data)
-
             return Response(
                 {
                     'status': True,
@@ -413,4 +476,56 @@ class GetUserAPI(APIView):
                     'message': 'user not authenticated.',
                     'data': {}
                 }, status=401
+            )
+    
+    
+    def patch(self, request):
+        try:
+            data = request.data
+            if data.get("name") or data.get("profile_image"):
+                try:
+                    user = User.objects.get(id=request.user.id)
+                    serializer = CNFUserSerializer(instance=user, data=data, partial=True)
+                    
+                    if serializer.is_valid():
+                        serializer.save()
+                        return Response(
+                            {
+                                "status": True,
+                                "message": "Account updated",
+                                "data": serializer.data
+                            }
+                        )
+                    return Response(
+                            {
+                                "status": False,
+                                "message": serializer.errors,
+                                "data": {}
+                            }, status=400
+                        )
+                except User.DoesNotExist:
+                    return Response(
+                        {
+                            "status": False,
+                            "message": "User not found.",
+                            "data": {}
+                        }, status=404
+                    )
+
+            return Response(
+                {
+                    "status": False,
+                    "message": "Data not updated.",
+                    "data": {}
+                }, status=400
+            )
+
+        except Exception as e:
+            logger.error(f"Exception in verifyEmail GET: {e}", exc_info=True)
+            return Response(
+                {
+                    "status": False,
+                    "message": "something went wrong.",
+                    "data": {}
+                }, status=400
             )

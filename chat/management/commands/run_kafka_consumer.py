@@ -1,3 +1,4 @@
+# kafka_consumer.py
 import json
 from django.core.management.base import BaseCommand
 from django.conf import settings
@@ -14,9 +15,10 @@ class Command(BaseCommand):
         channel_layer = get_channel_layer()
 
         conf = {
-            'bootstrap.servers': settings.KAFKA_BROKER_URL,
-            'group.id': "django_websocket_consumer_group",
-            'auto.offset.reset': 'earliest'
+            "bootstrap.servers": settings.KAFKA_BROKER_URL,
+            "group.id": "django_websocket_consumer_group",
+            "enable.auto.commit": False,  # <- let it commit offsets
+            "auto.offset.reset": "latest"
         }
         consumer = Consumer(**conf)
         consumer.subscribe([settings.KAFKA_TOPIC])
@@ -25,6 +27,7 @@ class Command(BaseCommand):
             while True:
                 msg = consumer.poll(timeout=1.0)
                 if msg is None:
+                    self.stdout.write("No message polled this cycle.")
                     continue
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
@@ -43,7 +46,7 @@ class Command(BaseCommand):
                         "data": data
                     }
                 )
-                self.stdout.write(f"pushed massage to channel: {data}")
+                consumer.commit(asynchronous=False)
         except KeyboardInterrupt:
             self.stdout.write("Kafka consumer intrrupted. Shutting down...")
         except Exception as e:
