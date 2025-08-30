@@ -2,7 +2,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import generics
 from chat.serializers import GroupSerialiazer, ChatSerializer, MemberSerializer, RequestSerializer
-from chat.models import ChatGroup, Member, GroupChat, JoinRequest, File
+from chat.models import ChatGroup, Member, GroupChat, JoinRequest, File, Image
 import logging
 from rest_framework.permissions import IsAuthenticated
 from chat.permissions import IsMember
@@ -10,7 +10,9 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework import status
-from chat.tasks import finalize_group_creation, update_image
+from chat.tasks import finalize_group_creation
+import json
+from django.db import transaction
 logger = logging.getLogger()
 
 
@@ -62,11 +64,50 @@ class CreateGroupAPI(APIView):
             logger.info("post method called in CreateGroupAPI")
             data = request.data.copy()
             data["group_owner"] = request.user.pk
+            
+            # parse memberIds if sent as JSON string
+            raw_member_ids = data.get("memberIds")
+            member_ids = None
+            if raw_member_ids:
+                try:
+                    if isinstance(raw_member_ids, str):
+                        member_ids = json.loads(raw_member_ids)
+                    else:
+                        member_ids = raw_member_ids
+                    # normalize
+                    if not isinstance(member_ids, list):
+                        member_ids = [member_ids]
+                except Exception:
+                    member_ids = None
+            
+                        # detach file from payload and save synchronously (avoid passing file handles to Celery)
+            uploaded_image = None
+            if request.FILES.get("group_profile"):
+                uploaded_image = request.FILES.get("group_profile")    
+
             serializer = GroupSerialiazer(data=data)
             if serializer.is_valid():
                 logger.info("serializer is valid")
-                serializer.save()
-                finalize_group_creation.delay(data, serializer)
+                group = serializer.save()
+                                # Save group synchronously inside a transaction
+                with transaction.atomic():
+                    group = serializer.save()
+
+                    image_uid = None
+                    if uploaded_image:
+                        img = Image.objects.create(image=uploaded_image)
+                        group.group_profile = img
+                        group.save()
+                        image_uid = str(img.uid)
+                try:
+                    payload_group_uid = str(group.uid)
+                    if hasattr(finalize_group_creation, "delay"):
+                        finalize_group_creation.delay(payload_group_uid, member_ids or [], image_uid)
+                    else:
+                        # fallback to direct call (local)
+                        finalize_group_creation(payload_group_uid, member_ids or [], image_uid)
+                except Exception as task_exc:
+                    logger.exception(f"failed to enqueue finalize_group_creation: {task_exc}")
                 return Response(
                     {
                         "status": True,
@@ -111,7 +152,17 @@ class CreateGroupAPI(APIView):
 
             profile = request.data.get("group_profile")
             if profile:
-                update_image(profile, group)
+                if group.group_profile is not None:
+                    if Image.objects.filter(image=group.group_profile.image).exists():
+                        group_profile = Image.objects.get(image=group.group_profile.image)
+                        group_profile.image = profile
+                        group_profile.save()
+                        logger.info("image updated.")
+                else:
+                    group_profile = Image.objects.create(image=profile)
+                    group.group_profile = group_profile
+                    group.save()
+                    logger.info("image created.")
 
             serializer = GroupSerialiazer(group, data=request.data, partial=True)
 

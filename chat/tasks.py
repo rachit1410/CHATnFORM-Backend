@@ -1,68 +1,68 @@
-from chat.models import Member, Image
+from chat.models import Member, Image, ChatGroup
 from django.contrib.auth import get_user_model
 import json
 import logging
-from rest_framework import serializers
 from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
+
 @shared_task
-def finalize_group_creation(data, serializer):
+def finalize_group_creation(group_uid, member_ids=None, image_uid=None):
+    """
+    Runs in worker process; accepts only serializable arguments.
+    - group_uid: str
+    - member_ids: list of ints (or empty list)
+    - image_uid: str or None
+    """
     User = get_user_model()
-    profile_image_list = data.pop('group_profile', None)
-    profile_image = None
-    if profile_image_list and isinstance(profile_image_list, list) and len(profile_image_list) > 0:
-        profile_image = profile_image_list[0]
-    if profile_image:
-        image = Image.objects.create(image=profile_image)
-    else:
-        image = None
-    owner = serializer.instance.group_owner
-    Member.objects.create(
-        member=owner,
-        group=serializer.instance,
-        role="admin"
-    )
-    if image:
-        serializer.instance.group_profile = image
-        serializer.instance.save()
-    if member_ids_raw := data.get('memberIds'):
+    try:
+        group = ChatGroup.objects.get(uid=group_uid)
+    except ChatGroup.DoesNotExist:
+        logger.error(f"finalize_group_creation: group {group_uid} not found")
+        return
+
+    # create owner as admin if not exists
+    try:
+        owner = group.group_owner
+        Member.objects.get_or_create(member=owner, group=group, defaults={"role": "admin"})
+    except Exception as e:
+        logger.exception(f"Error ensuring owner member for group {group_uid}: {e}")
+
+    # attach image if provided
+    if image_uid:
         try:
-            data['memberIds'] = json.loads(member_ids_raw)
-            if not isinstance(data['memberIds'], list):
-                data['memberIds'] = [data['memberIds']]
+            image = Image.objects.get(uid=image_uid)
+            group.group_profile = image
+            group.save()
+        except Image.DoesNotExist:
+            logger.error(f"finalize_group_creation: image {image_uid} not found")
+        except Exception as e:
+            logger.exception(f"finalize_group_creation: failed to attach image {image_uid} -> {e}")
 
-            members = []
-            for member_id in data['memberIds']:
-                member = Member(
-                    member=User.objects.get(id=member_id),
-                    group=serializer.instance,
-                    role="regular"
-                )
-                members.append(member)
-            Member.objects.bulk_create(members)
+    # create other members (member_ids expected as list)
+    if member_ids:
+        try:
+            if isinstance(member_ids, str):
+                member_ids = json.loads(member_ids)
+            if not isinstance(member_ids, list):
+                member_ids = [member_ids]
+        except Exception:
+            logger.exception("finalize_group_creation: failed to parse member_ids")
 
-        except (json.JSONDecodeError, IndexError) as e:
-            logger.error(f"Error processing member IDs: {e}")
-            print(f"Error processing member IDs: {e}")
-            raise serializers.ValidationError("Invalid member IDs format.")
-    else:
-        logger.info("No member IDs provided, skipping member creation.")
-        print("No member IDs provided, skipping member creation.")
+        members_to_create = []
+        for mid in member_ids:
+            try:
+                user = User.objects.get(id=mid)
+                # avoid duplicating owner/admin
+                if user == group.group_owner:
+                    continue
+                members_to_create.append(Member(member=user, group=group, role="regular"))
+            except User.DoesNotExist:
+                logger.warning(f"finalize_group_creation: user {mid} not found, skipping")
 
-
-@shared_task
-def update_image(profile, group):
-    if group.group_profile is not None:
-        if Image.objects.filter(image=group.group_profile.image).exists():
-            group_profile = Image.objects.get(image=group.group_profile.image)
-            group_profile.image = profile
-            group_profile.save()
-            logger.info("image updated.")
-    else:
-        group_profile = Image.objects.create(image=profile)
-        group.group_profile = group_profile
-        group.save()
-        logger.info("image created.")
-
+        if members_to_create:
+            try:
+                Member.objects.bulk_create(members_to_create)
+            except Exception as e:
+                logger.exception(f"finalize_group_creation: bulk_create failed: {e}")

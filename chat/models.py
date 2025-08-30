@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from chat.choices import GROUP_TYPES, MESSAGE_TYPE, ROLE_CHOICES
 import uuid
+from django.utils import timezone
 
 from chatnformBE.middleware.ws_middleware import User
 
@@ -57,6 +58,10 @@ class File(Base):
 
     def __str__(self):
         return self.file.name
+    
+    @property
+    def is_expired(self, lifetime_hours=24):
+        return timezone.now() > self.created_at + timezone.timedelta(hours=lifetime_hours)
 
 
 class GroupChat(Base):

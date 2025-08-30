@@ -20,41 +20,35 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         try:
             self.group_name = self.scope["url_route"]["kwargs"]["group_id"]
-            user = self.scope["user"]
-            user_id = user.id if user else None
-
-            if not user or not await is_member(self.group_name, user):
+            user = self.scope.get("user")
+            await self.channel_layer.group_add(
+                self.group_name,
+                self.channel_name
+            )
+            if user and await is_member(self.group_name, user):
+                # accept first, then attempt send; protect send with try/except
+                await self.accept()
+                try:
+                    await self.send(text_data=json.dumps({"message": "connection made."}))
+                except Exception as send_exc:
+                    # client disconnected before/while we tried to send; log and stop
+                    logger.info(f"Client disconnected during initial send: {send_exc}")
+                    return
+            else:
                 logger.info("Not authorized.")
-                await self.close()
-                return
-
-            self.user_group = f"user_{user_id}_{self.group_name}"
-
-            # 🔑 Deduplicate: ensure only 1 socket per (user, group)
-            cache_key = f"ws_active_{user_id}_{self.group_name}"
-            old_channel = cache.get(cache_key)
-            if old_channel and old_channel != self.channel_name:
-                # tell old socket to disconnect
-                await self.channel_layer.send(
-                    old_channel,
-                    {"type": "force_disconnect"}
-                )
-
-            # save current channel
-            cache.set(cache_key, self.channel_name, timeout=3600)
-
-            # Join groups
-            await self.channel_layer.group_add(self.user_group, self.channel_name)
-            await self.channel_layer.group_add(self.group_name, self.channel_name)
-
-            await self.accept()
-            logger.info("WebSocket connection accepted.")
-            await self.send(text_data=json.dumps({"message": "connection made."}))
-
+                # try close but ignore errors if socket already closed
+                try:
+                    await self.close()
+                except Exception:
+                    logger.debug("Socket already closed while attempting to close on unauthorized connect.")
         except Exception as e:
-            logger.exception(f"Error during WebSocket connect: {e}")
-            await self.close(code=1011)
-
+            logger.exception(f"Error during WebSocket connect:{e}")
+            # closing may fail if client already disconnected; ignore secondary errors
+            try:
+                await self.close(code=1011)
+            except Exception:
+                logger.debug("Ignored error while closing after connect exception.")
+    
     async def receive(self, text_data=None):
         from chat.models import ChatGroup, GroupChat
         User = get_user_model()
@@ -113,14 +107,26 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
 
         except ChatGroup.DoesNotExist:
-            await self.send(text_data=json.dumps(
-                {"error": "You are not authorised to message in this group."}
-            ))
+            try: 
+                await self.send(text_data=json.dumps(
+                    {"error": "You are not authorised to message in this group."}
+                ))
+            except Exception as send_exc:
+                    # client disconnected before/while we tried to send; log and stop
+                    logger.info(f"Client disconnected during initial send: {send_exc}")
+                    return
         except StopConsumer:
-            await self.close()
+            try: 
+                await self.close()
+            except Exception:
+                    logger.debug("Socket already closed while attempting to close on unauthorized connect.")
         except Exception as e:
             logger.exception(f"Error during message receive: {e}")
-            await self.send(text_data=json.dumps({"error": "Message processing error."}))
+            try:
+                await self.send(text_data=json.dumps({"error": "Message processing error."}))
+            except Exception as send_exc:
+                logger.info(f"Client disconnected during error send: {send_exc}")
+                return
 
     async def disconnect(self, close_code):
         logger.info(f"WebSocket disconnected: {close_code}")
@@ -132,7 +138,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 cache.delete(cache_key)
 
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
-        await self.channel_layer.group_discard(self.user_group, self.channel_name)
 
     async def send_realtime_data(self, event):
         logger.info("sending message to WebSocket")
@@ -149,21 +154,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     decrypted_msg = fernet.decrypt(data["message"].encode("utf-8")).decode("utf-8")
                 except Exception:
                     decrypted_msg = data["message"]
-
-            await self.send(text_data=json.dumps({
-                "id": data.get("id"),
-                "type": data.get("message_type", "text"),
-                "message": decrypted_msg,
-                "sender_id": data.get("sender_id"),
-                "sender_name": data.get("sender_name"),
-                "file": data.get("file"),
-                "timestamp": data.get("timestamp")
-            }))
+            
+            try: 
+                await self.send(text_data=json.dumps({
+                    "id": data.get("id"),
+                    "type": data.get("message_type", "text"),
+                    "message": decrypted_msg,
+                    "sender_id": data.get("sender_id"),
+                    "sender_name": data.get("sender_name"),
+                    "file": data.get("file"),
+                    "timestamp": data.get("timestamp")
+                }))
+            except Exception as send_exc:
+                    # client disconnected before/while we tried to send; log and stop
+                    logger.info(f"Client disconnected during initial send: {send_exc}")
+                    return
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
-            await self.close(code=1011)
+            try:
+                await self.close(code=1011)
+            except Exception:
+                    logger.debug("Socket already closed while attempting to close on unauthorized connect.")
 
     # 🔑 Handle duplicate connection cleanup
     async def force_disconnect(self, event):
         logger.info("Force disconnecting duplicate socket")
-        await self.close()
+        try:
+            await self.close()
+        except Exception:
+            logger.debug("Socket already closed while attempting to close on unauthorized connect.")
