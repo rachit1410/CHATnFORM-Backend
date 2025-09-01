@@ -1,0 +1,133 @@
+version: "3.9"
+
+services:
+  django:
+    build: .
+    container_name: django
+    command: uvicorn chatnformBE.asgi:application --host 0.0.0.0 --port 8000
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - elasticsearch
+    ports:
+      - "8000:8000"
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    mem_limit: 512m
+
+  redis:
+    image: redis:7
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    mem_limit: 512m
+
+  kafka-consumer:
+    build: .
+    container_name: kafka-consumer
+    command: python manage.py run_kafka_consumer
+    depends_on:
+      - kafka
+      - django
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    container_name: elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    mem_limit: 1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+
+  celery:
+    build: .
+    container_name: celery
+    command: celery -A chatnformBE worker -l info
+    volumes:
+      - .:/app
+    depends_on:
+      - django
+      - redis
+
+  cron:
+    build:
+      context: .
+      dockerfile: Dockerfile.cron
+    volumes:
+      - ./scripts:/app/scripts
+    depends_on:
+      - django
+    restart: always
+    mem_limit: 256m
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf:/etc/nginx/conf.d
+      - certbot-data:/etc/letsencrypt
+    depends_on:
+      - django
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - certbot-data:/etc/letsencrypt
+      - ./nginx/conf:/etc/nginx/conf.d
+    entrypoint: >
+      sh -c "echo 'Certbot placeholder, replace with real command later'"
+
+volumes:
+  pgdata:
+  esdata:
+  certbot-data:
