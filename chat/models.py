@@ -4,8 +4,6 @@ from chat.choices import GROUP_TYPES, MESSAGE_TYPE, ROLE_CHOICES
 import uuid
 from django.utils import timezone
 
-from chatnformBE.middleware.ws_middleware import User
-
 
 class Base(models.Model):
     uid = models.UUIDField(default=uuid.uuid4, primary_key=True, unique=True, editable=False)
@@ -53,6 +51,7 @@ class Member(Base):
 
 
 class File(Base):
+    User = get_user_model()
     file = models.FileField(upload_to="files/")
     uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="uploaded_files")
 

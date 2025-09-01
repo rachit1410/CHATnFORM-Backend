@@ -484,8 +484,6 @@ class MessageAPI(generics.ListAPIView):
     # This is the hot path. Optimize with select_related (sender, group).
     # Pagination required (don’t return 10k messages).
     # No Celery here, it’s read-only.
-
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, IsMember]
     queryset = GroupChat.objects.all()
     serializer_class = ChatSerializer
@@ -496,7 +494,6 @@ class MessageAPI(generics.ListAPIView):
 
 
 class DeleteMessageApi(generics.DestroyAPIView):
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, IsMember]
     queryset = GroupChat.objects.all()
     serializer_class = ChatSerializer

@@ -1,36 +1,55 @@
-import jwt
-from django.conf import settings
+# your_app/auth.py
+
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
-from urllib.parse import parse_qs
-
-User = get_user_model()
+from django.contrib.auth.models import AnonymousUser
+from django.core.cache import cache
+import urllib.parse
 
 @database_sync_to_async
-def get_user_from_token(token):
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        return User.objects.get(id=payload["user_id"])
-    except Exception:
-        return None
+def get_user(token):
+    """
+    Retrieves and invalidates a user based on a temporary token from the cache.
+    """
+    user_id = cache.get(token)
+    print("User ID from cache:", user_id)
+    if user_id:
+        try:
+            user = get_user_model().objects.get(id=user_id)
+            # Invalidate the token immediately after use
+            cache.delete(token)
+            return user
+        except get_user_model().DoesNotExist:
+            return AnonymousUser()
+    return AnonymousUser()
 
-
-class JWTAuthMiddleware:
-    def __init__(self, inner):
-        self.inner = inner
+class TokenAuthMiddleware:
+    def __init__(self, app):
+        self.app = app
 
     async def __call__(self, scope, receive, send):
-        query_string = parse_qs(scope["query_string"].decode())
-        token = query_string.get("token", [None])[0]
+        try:
+            # Decode the query string to get all parameters
+            query_string = scope.get('query_string', b'').decode('utf-8')
+            query_params = urllib.parse.parse_qs(query_string)
 
-        user = None
-        if token:
-            user = await get_user_from_token(token)
+            # Get the temporary token and group ID from the parsed query parameters
+            # parse_qs returns a list for each key, so we take the first element
+            temp_token = query_params.get('token', [None])[0]
+            group_id = query_params.get('group', [None])[0]
 
-        if user:
-            scope["user"] = user
-        else:
-            scope["user"] = None
-            print("Not authenticated or not a member")
+            # Set the user and group_id in the scope for the consumer to use
+            if temp_token:
+                scope['user'] = await get_user(temp_token)
+            else:
+                scope['user'] = AnonymousUser()
+                
+            scope['group_id'] = group_id
+            
+        except Exception as e:
+            # Handle any decoding or parsing errors
+            print(f"Error in TokenAuthMiddleware: {e}")
+            scope['user'] = AnonymousUser()
+            scope['group_id'] = None
 
-        return await self.inner(scope, receive, send)
+        return await self.app(scope, receive, send)

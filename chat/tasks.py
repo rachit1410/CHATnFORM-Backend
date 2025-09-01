@@ -6,7 +6,6 @@ from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
-
 @shared_task
 def finalize_group_creation(group_uid, member_ids=None, image_uid=None):
     """

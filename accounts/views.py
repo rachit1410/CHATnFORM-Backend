@@ -1,7 +1,9 @@
 import logging
+import token
 from rest_framework.views import APIView
 from accounts.serializers import UserRegisterSerializer, UserLoginSerializer, CNFUserSerializer
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.response import Response
 from accounts.utils import generate_otp, is_verified, varify_otp, validate_new_passsword
@@ -10,12 +12,15 @@ from accounts.models import VerifiedEmail
 from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.tasks import send_otp
 from rest_framework.parsers import MultiPartParser, FormParser
+import uuid
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
 # new registeration
 class RegisterApiView(APIView):
+    authentication_classes = []  # No authentication needed for this view
+    permission_classes = [AllowAny]
 
     def post(self, request):
         try:
@@ -60,6 +65,8 @@ class RegisterApiView(APIView):
 
 
 class SendOTP(APIView):
+    authentication_classes = [] # No authentication needed for this view
+    permission_classes = [AllowAny]
 
     def post(self, request):
         try:
@@ -119,6 +126,8 @@ class SendOTP(APIView):
 
 
 class VerifyEmail(APIView):
+    authentication_classes = []  # No authentication needed for this view
+    permission_classes = [AllowAny]
 
     def post(self, request):
         try:
@@ -160,38 +169,45 @@ class VerifyEmail(APIView):
             )
 
 
-# login
-class LoginApiView(APIView):
+class TokenRefreshView(APIView):
+    authentication_classes = []  # No authentication needed for this view
+    permission_classes = [AllowAny]
 
-    def get(self, request):
+    def post(self, request):
         refresh_token = request.COOKIES.get('refresh_token')
         if not refresh_token:
             return Response(
-                {
-                    'status': False,
-                    'message': 'No refresh token',
-                    'data': {}
-                })
-
+                {'status': False, 'message': 'No refresh token'}, status=401
+            )
         try:
             refresh = RefreshToken(refresh_token)
-            access = str(refresh.access_token)
-            return Response(
+            # This generates a new access token and sets it in the cookie
+            res = Response(
                 {
                     'status': True,
                     'message': 'Token refreshed.',
                     'data': {
-                        'access': access
+                        'accessExpiry': refresh.access_token.payload.get('exp'),
                     }
                 }
             )
+            res.set_cookie(
+                key='access_token',
+                value=str(refresh.access_token),
+                httponly=True,
+                secure=True,
+                samesite='Strict',
+                max_age=40 * 60, # 40 minutes in seconds
+            )
+            return res
         except Exception:
-            return Response(
-                {
-                    'status': False,
-                    'message': 'Invalid refresh token',
-                    'data': {}
-                },)
+            return Response({'status': False, 'message': 'Invalid refresh token'}, status=401)
+
+
+# login
+class LoginApiView(APIView):
+    authentication_classes = []  # No authentication needed for this view
+    permission_classes = [AllowAny]
 
     def post(self, request):
         try:
@@ -228,7 +244,7 @@ class LoginApiView(APIView):
                         "status": True,
                         "message": "Logged in successfully",
                         "data": {
-                            "access": str(token.access_token)
+                            "accessExpiry": token.access_token.payload.get("exp"),
                         }
                     }
                 )
@@ -238,9 +254,19 @@ class LoginApiView(APIView):
                     value=str(token),
                     httponly=True,
                     secure=True,
-                    samesite='Lax',
-                    max_age=7 * 24 * 3600,
+                    samesite='Strict',
+                    max_age=7 * 24 * 3600, # 7 days
                 )
+                
+                res.set_cookie(
+                    key='access_token',
+                    value=str(token.access_token),
+                    httponly=True,
+                    secure=True,
+                    samesite='Lax',
+                    max_age= 40 * 3600, # 40 minutes
+                )
+
                 return res
             logger.warning(f"Registration failed: {serializer.errors}")
             return Response(
@@ -262,50 +288,27 @@ class LoginApiView(APIView):
             )
 
     def delete(self, request):
-        try:
-            refresh_token = request.COOKIES.get('refresh_token')
-            if refresh_token:
-                try:
-                    token = RefreshToken(refresh_token)
-                    token.blacklist()
-                except Exception as e:
-                    logger.error(f"Error blacklisting token: {e}", exc_info=True)
-                    return Response(
-                        {
-                            "status": False,
-                            "message": "Failed to blacklist token.",
-                            "data": {}
-                        }
-                    )
-                return Response(
-                    {
-                        "status": True,
-                        "message": "Logged out successfully.",
-                        "data": {}
-                    }
-                )
+        res = Response({'status': True, 'message': 'Logged out successfully.'})
+        # Blacklist the refresh token
+        refresh_token = request.COOKIES.get('refresh_token')
+        if refresh_token:
+            try:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            except Exception:
+                # Token was already invalid, just continue to delete cookies
+                pass
 
-            else:
-                return Response(
-                    {
-                        "status": False,
-                        "message": "Refresh token required for logout.",
-                        "data": {}
-                    }
-                )
-        except Exception as e:
-            logger.error(f"Error blacklisting token: {e}", exc_info=True)
-            return Response(
-                {
-                    "status": False,
-                    "message": "Failed to logout.",
-                    "data": {}
-                }
-            )
-  
+        # Delete the cookies from the browser
+        res.delete_cookie('access_token')
+        res.delete_cookie('refresh_token')
+        return res
         
 # change password >    
 class SendOTPCP(APIView):
+    authentication_classes = []  # No authentication needed for this view
+    permission_classes = [AllowAny]
+
     # sends otp for changing password
     # different from SendOtp as it verifies the user's email before sending the OTP
 
@@ -365,6 +368,9 @@ class SendOTPCP(APIView):
 
 
 class VarifyToCP(APIView):
+    authentication_classes = []  # No authentication needed for this view
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
             email = request.data.get("email")
@@ -398,6 +404,9 @@ class VarifyToCP(APIView):
 
 
 class ChangePassword(APIView):
+    authentication_classes = []  # No authentication needed for this view
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
             data = request.data
@@ -529,3 +538,22 @@ class MyAccount(APIView):
                     "data": {}
                 }, status=400
             )
+
+
+# websocket authentication
+
+class WebSocketTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Generate a unique, short-lived token
+        temp_token = str(uuid.uuid4())
+        
+        # Store the token in Django's cache with a short expiration time (e.g., 10 seconds)
+        cache.set(temp_token, request.user.id, timeout=100)
+
+        return Response({
+            'status': True,
+            'message': 'WebSocket token generated.',
+            'data': {'token': temp_token}
+        })

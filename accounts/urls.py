@@ -7,7 +7,9 @@ from accounts.views import (
     ChangePassword,
     SendOTP,
     MyAccount,
-    SendOTPCP
+    SendOTPCP,
+    TokenRefreshView,
+    WebSocketTokenView
 )
 
 urlpatterns = [
@@ -19,4 +21,6 @@ urlpatterns = [
     path("forgot-password/", SendOTPCP.as_view()),
     path('varify-otp/', VarifyToCP.as_view()),
     path('change-password/', ChangePassword.as_view()),
+    path('refresh/', TokenRefreshView.as_view()),
+    path('ws-token/', WebSocketTokenView.as_view()),
 ]

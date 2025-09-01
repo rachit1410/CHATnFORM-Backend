@@ -19,13 +19,21 @@ fernet = Fernet(settings.FERNET_KEY)
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         try:
-            self.group_name = self.scope["url_route"]["kwargs"]["group_id"]
             user = self.scope.get("user")
-            await self.channel_layer.group_add(
-                self.group_name,
-                self.channel_name
-            )
+            self.group_name = self.scope.get("group_id")
+
+            # Check if user and group_id were successfully set by the middleware
+            if not user or not self.group_name:
+                logger.info("Connection attempt without a valid user or group ID.")
+                await self.close(code=4001)  # Use a custom close code
+                return
+
             if user and await is_member(self.group_name, user):
+                await self.channel_layer.group_add(
+                    self.group_name,
+                    self.channel_name
+                )
+
                 # accept first, then attempt send; protect send with try/except
                 await self.accept()
                 try:
