@@ -115,6 +115,7 @@ services:
     volumes:
       - ./nginx/conf:/etc/nginx/conf.d
       - certbot-data:/etc/letsencrypt
+      - /var/www/certbot:/var/www/certbot
     depends_on:
       - django
 
@@ -123,9 +124,9 @@ services:
     container_name: certbot
     volumes:
       - certbot-data:/etc/letsencrypt
-      - ./nginx/conf:/etc/nginx/conf.d
-    entrypoint: >
-      sh -c "echo 'Certbot placeholder, replace with real command later'"
+      - /var/www/certbot:/var/www/certbot
+    entrypoint: > 
+      sh -c "certbot certonly --webroot -w /var/www/certbot -d cnfapi.rachito.online --email $ACME_EMAIL --agree-tos --non-interactive"
 
 volumes:
   pgdata:
