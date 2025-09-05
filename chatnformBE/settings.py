@@ -12,9 +12,11 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
-from dotenv import load_dotenv
 from datetime import timedelta
-load_dotenv()
+from decouple import config
+from urllib.parse import urlparse, parse_qsl
+import ssl
+from storages.backends.s3boto3 import S3Boto3Storage
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,12 +26,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("SECRET_KEY", "insecure_secret_key")
+SECRET_KEY = config("SECRET_KEY", "insecure_secret_key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1")
+DEBUG = config("DEBUG", "False").lower() in ("true", "1")
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", "*").split(",")
 
 
 # Application definition
@@ -56,8 +58,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -91,14 +93,17 @@ ASGI_APPLICATION = 'chatnformBE.asgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+DATABASE_URL = urlparse(config('DATABASE_URL'))
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME", "postgres"),
-        "USER": os.getenv("DB_USER", "postgres"),
-        "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
-        "HOST": os.getenv("DB_HOST", "db"),
-        "PORT": os.getenv("DB_PORT", "5432"),
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': DATABASE_URL.path.replace('/', ''),
+        'USER': DATABASE_URL.username,
+        'PASSWORD': DATABASE_URL.password,
+        'HOST': DATABASE_URL.hostname,
+        'PORT': 5432,
+        'OPTIONS': dict(parse_qsl(DATABASE_URL.query)),
     }
 }
 
@@ -135,25 +140,39 @@ USE_I18N = True
 USE_TZ = True
 
 # Security
-SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() in ("true", "1")
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", "True").lower() in ("true", "1")
+# SESSION_COOKIE_SECURE = True
+# CSRF_COOKIE_SECURE = True
+# SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # fernet secret key
-FERNET_KEY = os.getenv("FERNET_KEY")
+FERNET_KEY = config("FERNET_KEY")
 
 # cors production only settings
 
-CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+# CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", "").split(",")
+CORS_ALLOWED_ORIGINS =["http://localhost:5173","http://127.0.0.1:5173"]
 CORS_ALLOW_CREDENTIALS = True
 
 
 # ELASTICSEARCH
+ELASTICSEARCH_HOST = config("ELASTICSEARCH_HOST")
+ELASTICSEARCH_PORT = config("ELASTICSEARCH_PORT", cast=int, default=9243)
+ELASTICSEARCH_USERNAME = config("ELASTICSEARCH_USERNAME")
+ELASTICSEARCH_PASSWORD = config("ELASTICSEARCH_PASSWORD")
+
 ELASTICSEARCH_DSL = {
-    "default": {
-        "hosts": os.getenv("ELASTICSEARCH_HOST", "http://elasticsearch:9200"),
-        "verify_certs": False,
+    'default': {
+        'hosts': [
+            {
+                'host': ELASTICSEARCH_HOST,
+                'port': ELASTICSEARCH_PORT,
+                'scheme': 'https',
+            }
+        ],
+        "basic_auth": (ELASTICSEARCH_USERNAME, ELASTICSEARCH_PASSWORD),
+        "verify_certs": True,
+        # "ca_certs": "/absolute/path/to/ca.pem",  # if provider gives you a custom cert
     }
 }
 
@@ -164,37 +183,52 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [os.getenv("REDIS_URL", "redis://redis:6379/0")],
+            "hosts": [config("REDIS_URL")],
         },
     },
 }
 
 # kafka configuration
-KAFKA_BROKER_URL = os.getenv("KAFKA_BROKER_URL", "kafka:9092")
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "messages")
-
+KAFKA_BOOTSTRAP_SERVERS = config("KAFKA_BOOTSTRAP_SERVERS")
+KAFKA_SECURITY_PROTOCOL = config('KAFKA_SECURITY_PROTOCOL')
+KAFKA_SASL_MECHANISM = config('KAFKA_SASL_MECHANISM')
+KAFKA_SASL_USERNAME = config('KAFKA_SASL_USERNAME')
+KAFKA_SASL_PASSWORD = config('KAFKA_SASL_PASSWORD')
+KAFKA_CA_LOCATION = os.path.join(BASE_DIR, config('KAFKA_CA_LOCATION'))
+KAFKA_TOPIC = "messages"
+KAFKA_CLIENT_ID = 'chatnforms-client'
 # SMTP configration
+FROM_EMAIL = config('FROM_EMAIL')
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-FROM_EMAIL = os.getenv('FROM_EMAIL')
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ("true", "1")
-EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() in ("true", "1")
+EMAIL_HOST = config("EMAIL_HOST")
+EMAIL_PORT = int(config("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = config("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", "True").lower() in ("true", "1")
+EMAIL_USE_SSL = config("EMAIL_USE_SSL", "False").lower() in ("true", "1")
 
+DEFAULT_FROM_EMAIL = config('FROM_EMAIL')
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 # STATIC & MEDIA
-STATIC_URL = "/static/"
+STATIC_URL = "https://cdn.jsdelivr.net/gh/rachit1410/chatnformCHATnFORM-Backend@main/static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "public/staticfiles")
-STATICFILES_DIRS = [os.path.join(BASE_DIR, "public/static")]
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "public/staticfiles")]
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = os.path.join(BASE_DIR, "public/media")
+# SUPABASE CREDENTIALS
+
+SUPABASE_URL=config("SUPABASE_URL")
+SUPABASE_KEY=config("SUPABASE_KEY")
+SUPABASE_BUCKET=config("SUPABASE_BUCKET")
+
+DEFAULT_FILE_STORAGE = "accounts.storages.SupabaseStorage"
+MEDIA_URL = (
+    f"{SUPABASE_URL}/storage/v1/object/public/"
+    f"{SUPABASE_BUCKET}/"
+)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -209,14 +243,25 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("ACCESS_TOKEN_MINUTES", "30"))),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("REFRESH_TOKEN_DAYS", "7"))),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(config("ACCESS_TOKEN_MINUTES", "30"))),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(config("REFRESH_TOKEN_DAYS", "7"))),
 }
+
+REDIS_URL = config("REDIS_URL")
 
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": [os.getenv("REDIS_URL", "redis://redis:6379/1")],
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "PASSWORD": REDIS_URL.split(":")[2].split("@")[0] if "@" in REDIS_URL else None,
+            "SSL": True if REDIS_URL.startswith("rediss://") else False,
+            "CONNECTION_POOL_KWARGS": {
+                "ssl_cert_reqs": ssl.CERT_NONE,   # <- disable verification for dev
+            },
+        },
+        "KEY_PREFIX": "chatnform",
     }
 }
 
@@ -238,14 +283,20 @@ LOGGING = {
         "console": {"level": "DEBUG", "class": "logging.StreamHandler", "formatter": "simple"},
     },
     "loggers": {
-        "django": {"handlers": ["console"], "level": os.getenv("DJANGO_LOG_LEVEL", "INFO")},
+        "django": {"handlers": ["console"], "level": config("DJANGO_LOG_LEVEL", "INFO")},
     },
 }
 
 # CELERY
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
+
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "ssl": {
+        "ssl_cert_reqs": ssl.CERT_NONE,   # works with rediss://
+    }
+}

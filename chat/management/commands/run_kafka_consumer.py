@@ -4,7 +4,8 @@ from django.core.management.base import BaseCommand
 from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from confluent_kafka import Consumer, KafkaError
+from confluent_kafka import KafkaError
+from chat.kafka_client import get_kafka_consumer
 
 
 class Command(BaseCommand):
@@ -14,13 +15,7 @@ class Command(BaseCommand):
         self.stdout.write("Starting Kafka consumer")
         channel_layer = get_channel_layer()
 
-        conf = {
-            "bootstrap.servers": settings.KAFKA_BROKER_URL,
-            "group.id": "django_websocket_consumer_group",
-            "enable.auto.commit": False,  # <- let it commit offsets
-            "auto.offset.reset": "latest"
-        }
-        consumer = Consumer(**conf)
+        consumer = get_kafka_consumer("my-django-consumer-group")
         consumer.subscribe([settings.KAFKA_TOPIC])
 
         try:

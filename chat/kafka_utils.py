@@ -1,12 +1,11 @@
 # kafka_utils.py
 import json
 import logging
-from confluent_kafka import Producer
-from django.conf import settings
+from .kafka_client import get_kafka_producer
 
 logger = logging.getLogger(__name__)
 
-producer = Producer({"bootstrap.servers": settings.KAFKA_BROKER_URL})
+producer = get_kafka_producer()
 
 
 def delivery_report(err, msg):

@@ -12,7 +12,6 @@ def get_user(token):
     Retrieves and invalidates a user based on a temporary token from the cache.
     """
     user_id = cache.get(token)
-    print("User ID from cache:", user_id)
     if user_id:
         try:
             user = get_user_model().objects.get(id=user_id)

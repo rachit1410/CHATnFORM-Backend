@@ -98,9 +98,26 @@ class SendOTP(APIView):
 
             generate_otp(email)
             otp = cache.get(f"otp:{email}")
-            send_otp.delay(
+            
+            plain_message = (
+                f"Hi there,\n\n"
+                f"You recently requested a One-Time Password (OTP) to verify your email address.\n\n"
+                f"Your OTP is: {otp}\n\n"
+                f"This code is valid for the next 10 minutes. Please do not share this with anyone. "
+                f"If you did not request this OTP, please ignore this email.\n\n"
+                f"Thank you,\n"
+                f"The ChatNForm"
+            )
+            if hasattr(send_otp, "deley"):
+                send_otp.deley(
                     subject="OTP for email verification.",
-                    message=f'''Your otp for email verification is {otp}. Enter this otp in otp verification section and hit verify to complete your registration''',
+                    message=plain_message,
+                    email=email
+                )
+            else:
+                send_otp(
+                    subject="OTP for email verification.",
+                    message=plain_message,
                     email=email
                 )
             logger.info(f"Sent OTP email to: {email}")
@@ -340,9 +357,18 @@ class SendOTPCP(APIView):
 
             generate_otp(email)
             otp = cache.get(f"otp:{email}")
-            send_otp.delay(
+            plain_message = (
+                f"Hi there,\n\n"
+                f"You recently requested a One-Time Password (OTP) to verify your email address.\n\n"
+                f"Your OTP is: {otp}\n\n"
+                f"This code is valid for the next 10 minutes. Please do not share this with anyone. "
+                f"If you did not request this OTP, please ignore this email.\n\n"
+                f"Thank you,\n"
+                f"The ChatNForm"
+            )
+            send_otp(
                     subject="OTP for email verification.",
-                    message=f'''Your otp for email verification is {otp}. Enter this otp in otp verification section and hit verify to change password''',
+                    message=plain_message,
                     email=email
                 )
             logger.info(f"Sent OTP email to: {email}")
